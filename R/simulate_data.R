@@ -23,7 +23,7 @@ library(dplyr) # Required for data manipulation
 #' - Binary: Bernoulli/logit model
 #' - Survival: exponential survival times with optional censoring
 #' - Supports parallel, paired, and one-sample designs
-#' - Adds baseline covariates (age, sex, biomarker)
+#' - Adds baseline covariates (age, sex)
 #' - Optionally splits into train/test sets
 #'
 #' @param design One of "parallel", "paired", "one-sample"
@@ -116,7 +116,7 @@ simulate_data <- function(design = c("parallel", "paired", "one-sample"),
   }
 
   if (outcome == "continuous" && design == "paired") { data <- data %>% dplyr::rename(y_diff = y) }
-  if (add_covariates) { data$age <- round(stats::rnorm(n_total, 60, 10)); data$sex <- factor(sample(c("Male", "Female"), n_total, TRUE)); data$biomarker <- stats::rnorm(n_total, mean = ifelse(data$arm == "treatment", 1, 0), sd = 1) }
+  if (add_covariates) { data$age <- round(stats::rnorm(n_total, 60, 10)); data$sex <- factor(sample(c("Male", "Female"), n_total, TRUE)) }
   if (design %in% c("paired", "one-sample") && outcome != "survival") { data <- dplyr::select(data, -arm) }
 
   if (!is.null(train_prop)) {

@@ -59,12 +59,19 @@ app_data_rv <- reactiveValues(
 
 # --- UI ---
 ui <- dashboardPage(
-  dashboardHeader(title = "ClinicalXAI: Explainable Predictive Modeling"),
+  dashboardHeader(title = "ClinicalXAI"),
   dashboardSidebar(
     sidebarMenu(
       menuItem("1. Build Model", tabName = "build_model", icon = icon("cogs")),
       menuItem("2. Performance", tabName = "performance", icon = icon("chart-line")),
-      menuItem("3. Explainable AI", tabName = "xai", icon = icon("brain"))
+      menuItem("3. Explainable AI", tabName = "xai", icon = icon("brain")),
+      hr(),
+      div(
+          style = "padding: 10px;",
+          actionButton("show_guide", "Help & Guide", icon = icon("info-circle"),
+                       width = "55%",
+                       class = "btn-info")
+      )
     )
   ),
   dashboardBody(
@@ -82,6 +89,20 @@ server <- function(input, output, session) {
   data_model_server("data_model_1", app_data_rv)
   performance_server("performance_1", app_data_rv)
   xai_server("xai_1", app_data_rv)
+
+  # Help & Guide Modal
+  observeEvent(input$show_guide, {
+    guide_path <- "www/user_guide.html"
+    guide_content <- HTML(readLines(guide_path, warn = FALSE))
+
+    showModal(modalDialog(
+      guide_content,
+
+      size = "l",
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
+  })
 }
 
 # --- Run App ---

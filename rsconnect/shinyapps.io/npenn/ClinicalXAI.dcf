@@ -1,0 +1,13 @@
+name: ClinicalXAI
+title: ClinicalXAI
+username: npenn
+account: npenn
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16028944
+bundleId: 11162077
+url: https://npenn.shinyapps.io/ClinicalXAI/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: LICENSE|renv.lock

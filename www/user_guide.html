@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>User Guide</title>
+    <!-- MathJax v2.7.7 -->
+    <script type="text/javascript" async
+      src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+    </script>
+    <script type="text/x-mathjax-config">
+        MathJax.Hub.Config({
+          // Removed tex2jax config, relying on robust delimiters: \(...\) and \[...\]
+          "HTML-CSS": { linebreaks: { automatic: true } },
+          SVG: { linebreaks: { automatic: true } }
+        });
+    </script>
+</head>
+<body>
+
+    <div id="user-guide-modal-content">
+        <style>
+            /* Apply general styles to the content container instead of the body */
+            #user-guide-modal-content {
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                padding: 10px; /* This padding will be for the content inside the modal */
+                max-width: 800px; /* Keep the max-width for the content */
+                margin: auto; /* Center the content within the modal */
+            }
+            #user-guide-modal-content h1 {
+                text-align: center;
+                color: #495057;
+            }
+            #user-guide-modal-content h2 {
+                border-bottom: 2px solid #007bff;
+                padding-bottom: 5px;
+                color: #007bff;
+            }
+            #user-guide-modal-content h3 {
+                color: #28a745;
+                margin-top: 20px;
+            }
+            #user-guide-modal-content table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }
+            #user-guide-modal-content th, #user-guide-modal-content td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+            #user-guide-modal-content th {
+                background-color: #f2f2f2;
+            }
+        </style>
+
+        <h1 style="text-align: center; color: #495057;">📘 User Guide: Predictive Modeling & Explainable AI (XAI)</h1>
+
+        <h2>1. Model Specification and Training ⚙️</h2>
+
+        <h3>Instructions:</h3>
+        <ul>
+            <li><strong>Select Outcome:</strong> Choose the target variable for your analysis.</li>
+            <li><strong>Select Task:</strong> Specify the modeling goal (Classification, Regression, or Survival).</li>
+            <li><strong>Choose Features:</strong> Select the predictor variables.</li>
+            <li><strong>Select Model Type:</strong> Choose the appropriate algorithm.</li>
+            <li><strong>Train Model:</strong> Click the button to initiate model training.</li>
+        </ul>
+
+        <h3>Theoretical Background:</h3>
+        <table>
+            <thead>
+                <tr><th>Task</th><th>Outcome Structure</th><th>Model Principles</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Classification</strong></td>
+                    <td>A factor with two levels.</td>
+                    <td>Algorithms predict the <strong>probability</strong> of the positive class (\(\mathbf{P(Y=1)}\)).</td>
+                </tr>
+                <tr>
+                    <td><strong>Regression</strong></td>
+                    <td>A continuous numeric variable.</td>
+                    <td>Algorithms predict the <strong>expected value</strong> of the outcome (\(\mathbf{E[Y|X]}\)).</td>
+                </tr>
+                <tr>
+                    <td><strong>Survival</strong></td>
+                    <td>Time-to-event (time) and event indicator (status).</td>
+                    <td>Models focus on the <strong>Hazard Function</strong> (\(\mathbf{\lambda(t|X)}\)), the instantaneous risk of the event.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <hr>
+
+        <h2>2. Model Performance Evaluation 📈</h2>
+
+        <h3>Instructions:</h3>
+        <ul>
+            <li>Click the <strong>Compute Performance</strong> button.</li>
+            <li>View the **Metrics Table** for quantitative results.</li>
+            <li>For Survival models, use the checkbox to switch between **Linear Predictor** and **Hazard Ratio (Risk Score)**.</li>
+        </ul>
+
+        <h3>Computations and Interpretation:</h3>
+        <table>
+            <thead>
+                <tr><th>Task</th><th>Metric/Plot</th><th>Interpretation</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Classification</strong></td>
+                    <td><strong>AUC</strong> (Area Under the ROC Curve)</td>
+                    <td>Measures the model's ability to <strong>distinguish</strong> between classes. (1.0 = perfect, 0.5 = random).</td>
+                </tr>
+                <tr>
+                    <td><strong>Regression</strong></td>
+                    <td><strong>RMSE</strong> (Root Mean Square Error)</td>
+                    <td>Measures average squared prediction error. **Lower is better**.</td>
+                </tr>
+                <tr>
+                    <td><strong>Survival</strong></td>
+                    <td><strong>C-index</strong> (Concordance Index)</td>
+                    <td>Measures the probability of correctly predicting which subject fails earlier. (1.0 = perfect, 0.5 = random).</td>
+                </tr>
+                <tr>
+                    <td><strong>Survival Plot</strong></td>
+                    <td><strong>Linear Predictor (Log-Hazard)</strong></td>
+                    <td>Proxy for the \(\mathbf{\log(\text{Hazard Ratio})}\). Higher values indicate <strong>higher predicted risk</strong>.</td>
+                </tr>
+                <tr>
+                    <td><strong>Survival Plot</strong></td>
+                    <td><strong>Hazard Ratio (Risk Score)</strong></td>
+                    <td>The relative risk (\(\mathbf{e^{\text{Linear Predictor}}}\)). A value of 2.0 means twice the baseline risk.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <hr>
+
+        <h2>3. Explainable AI (XAI) with SHAP Values 🧠</h2>
+
+        <h3>Instructions:</h3>
+        <ul>
+            <li>Click <strong>Compute SHAP / Importance</strong> to run the attribution calculation.</li>
+            <li><strong>Global Importance:</strong> View the ranked bar chart of feature impact (Mean \(|\text{SHAP}|\)).</li>
+            <li><strong>Local Explanation:</strong> Select an **Observation ID** to see a detailed explanation (Force Plot) for a single prediction.</li>
+        </ul>
+
+        <h3>Theoretical Background: The SHAP Principle</h3>
+        <p>SHAP (SHapley Additive exPlanations) attributes a prediction to individual features by calculating the **Shapley Value**—the average marginal contribution of a feature across all possible feature combinations.</p>
+        <p>The core relationship is:
+            \[\mathbf{\text{Prediction} = \text{Baseline} + \sum (\text{SHAP Value})}\]
+        </p>
+        <p>The Mean Absolute SHAP is often expressed as \(\mathbf{\text{Mean } |\text{SHAP}|}\).</p>
+
+        <h3>Interpretation of SHAP Outputs:</h3>
+        <table>
+            <thead>
+                <tr><th>Output Type</th><th>Meaning</th><th>Interpretation</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Mean \(|\text{SHAP}|\)</strong></td>
+                    <td>Global Feature Importance</td>
+                    <td>Features with the largest Mean \(|\text{SHAP}|\) are the <strong>most important</strong>, causing the biggest average change in prediction.</td>
+                </tr>
+                <tr>
+                    <td><strong>Positive SHAP Value</strong></td>
+                    <td>Local Contribution</td>
+                    <td>The feature's specific value **increases** the predicted outcome (e.g., higher predicted risk, higher regression value).</td>
+                </tr>
+                <tr>
+                    <td><strong>Negative SHAP Value</strong></td>
+                    <td>Local Contribution</td>
+                    <td>The feature's specific value **decreases** the predicted outcome (e.g., lower predicted risk, lower regression value).</td>
+                </tr>
+                <tr>
+                    <td><strong>Baseline Value</strong></td>
+                    <td>Local Explanation</td>
+                    <td>The **average prediction** of the model across the training dataset—the starting point for the individual prediction.</td>
+                </tr>
+            </tbody>
+        </table>
+
+    </div>
+
+</body>
+</html>

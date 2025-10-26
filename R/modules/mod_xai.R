@@ -102,6 +102,7 @@ xai_server <- function(id, app_data_rv) {
     shap_explainer <- reactiveVal(NULL)
     local_table_rv <- reactiveVal(NULL)
     val_data_rv <- reactiveVal(NULL)
+    plot_rv <- reactiveVal(NULL)
 
     # --- Validation upload ---
     observeEvent(input$val_data_upload, {
@@ -170,10 +171,14 @@ xai_server <- function(id, app_data_rv) {
           as.numeric(predict(model, newdata)$.pred)
         }
       }
-      # ************************
 
       compute_shap_df <- function(data) {
-        predictors <- data %>% dplyr::select(-all_of(outcome))
+        # 1. Define predictors: Select all columns EXCEPT the outcome and 'status' (if survival)
+        cols_to_remove <- c(outcome, if(task == "Survival") "status")
+
+        predictors <- data %>%
+          dplyr::select(-dplyr::any_of(cols_to_remove))
+
         # For survival, the response must be the survival object (time and status).
         if (task == "Survival") {
           response <- survival::Surv(data[[outcome]], data[["status"]])
@@ -265,13 +270,19 @@ xai_server <- function(id, app_data_rv) {
     # --- Global & local plots ---
     output$shap_plot <- renderPlotly({
       req(shap_rv())
+
+      p <- NULL
+
       if (input$xai_mode == "Global Importance") {
         shap_summary <- shap_rv() %>%
+          filter(!grepl("^id\\s*=", Feature)) %>% # Exclude "id" from features
           group_by(Feature) %>%
           summarise(TrainMeanAbs = mean(abs(SHAP_Value)), .groups = "drop")
+        shap_summary <<- shap_summary
 
         if (input$shap_mode == "compare" && !is.null(shap_val_rv())) {
           val_summary <- shap_val_rv() %>%
+            filter(!grepl("^id\\s*=", Feature)) %>%
             group_by(Feature) %>%
             summarise(ValMeanAbs = mean(abs(SHAP_Value)), .groups = "drop")
 
@@ -300,23 +311,61 @@ xai_server <- function(id, app_data_rv) {
             labs(title = "Mean |SHAP| Feature Importance (Training)",
                  x = "Feature", y = "Mean(|SHAP|)")
         }
-        ggplotly(p, tooltip = "text")
-
       } else {
+        # --- LOCAL EXPLANATION (FORCE PLOT) ---
         req(input$obs_id, shap_explainer())
         obs_idx <- as.integer(input$obs_id)
         single_obs <- app_data_rv$data[obs_idx, , drop = FALSE]
+
+        # Compute the breakdown
         breakdown <- predict_parts_break_down(shap_explainer(), new_observation = single_obs)
+
+        # Calculate baseline
         breakdown_df <- as.data.frame(breakdown) %>%
           select(variable, contribution, variable_value) %>%
           rename(Feature = variable, Contribution = contribution, Value = variable_value)
+
         baseline <- breakdown_df$Contribution[breakdown_df$Feature == "(Intercept)"]
-        breakdown_df <- breakdown_df %>% filter(Feature != "(Intercept)")
-        pred_value <- sum(breakdown_df$Contribution) + baseline
-        breakdown_df <- breakdown_df %>% mutate(Contribution = round(Contribution,4))
-        local_table_rv(list(df = breakdown_df, baseline = baseline, pred = pred_value))
-        plotly::ggplotly(plot(breakdown) + theme_minimal(base_size = 14))
+
+        filtered_breakdown_df <- breakdown_df %>%
+          filter(Feature != "(Intercept)") %>%
+          filter(!grepl("^id\\s*=", Feature))
+
+        pred_value <- sum(filtered_breakdown_df$Contribution) + baseline
+
+        # Set reactive value for the DT table
+        local_table_rv(list(df = breakdown_df %>% mutate(Contribution = round(Contribution, 4)),
+                            baseline = baseline, pred = pred_value))
+
+        # --- Custom ggplot for Local Explanation Plot ---
+        p <- ggplot(filtered_breakdown_df,
+                    aes(x = Contribution,
+                        y = reorder(Feature, Contribution),
+                        text = paste0("Observation: ", obs_idx,
+                                      "<br>Feature: ", Feature,
+                                      # "<br>Value: ", Value,
+                                      "<br>SHAP Contribution: ", round(Contribution, 4)))) +
+          geom_col(aes(fill = Contribution > 0)) +
+          labs(title = paste0("Local Explanation (Observation", input$obs_id, ")"),
+               x = "Contribution (SHAP Value)", y = "Feature") +
+          theme_minimal(base_size = 14) +
+          theme(legend.position = "none") +
+          geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+          # Add baseline and prediction notes
+          labs(subtitle = paste0("Baseline: ", round(baseline, 4), " | Predicted Value: ", round(pred_value, 4)))
       }
+
+      if (!is.null(p)) {
+        plot_rv(p)
+      }
+
+      # Return the plotly object for rendering
+      if (is.null(p)) {
+        return(NULL)
+      } else {
+        return(plotly::ggplotly(p, tooltip = "text"))
+      }
+
     })
 
     # --- Local explanation table ---
@@ -353,15 +402,23 @@ xai_server <- function(id, app_data_rv) {
     # --- Full SHAP data table ---
     output$shap_table <- renderDT({
       req(shap_rv())
-      datatable(shap_rv(), options = list(pageLength = 10, scrollX = TRUE))
+
+      filtered_shap_df <- shap_rv() %>%
+        filter(!grepl("^id\\s*=", Feature))
+
+      datatable(filtered_shap_df, options = list(pageLength = 10, scrollX = TRUE))
     })
 
     # --- Correlation heatmap ---
     output$shap_corr_plot <- renderPlotly({
       req(input$shap_mode == "compare", shap_rv(), shap_val_rv())
-      train_summary <- shap_rv() %>% group_by(Feature) %>%
+      train_summary <- shap_rv() %>%
+        filter(!grepl("^id\\s*=", Feature)) %>%
+        group_by(Feature) %>%
         summarise(TrainMeanAbs = mean(abs(SHAP_Value)), .groups="drop")
-      val_summary <- shap_val_rv() %>% group_by(Feature) %>%
+      val_summary <- shap_val_rv() %>%
+        filter(!grepl("^id\\s*=", Feature)) %>%
+        group_by(Feature) %>%
         summarise(ValMeanAbs = mean(abs(SHAP_Value)), .groups="drop")
       merged <- full_join(train_summary, val_summary, by="Feature") %>% replace(is.na(.),0)
       merged <- merged %>% mutate(Delta = abs(TrainMeanAbs - ValMeanAbs))
@@ -383,9 +440,13 @@ xai_server <- function(id, app_data_rv) {
     # --- Stability table ---
     output$shap_stability_table <- renderDT({
       req(input$shap_mode=="compare", shap_rv(), shap_val_rv())
-      train_summary <- shap_rv() %>% group_by(Feature) %>%
+      train_summary <- shap_rv() %>%
+        filter(!grepl("^id\\s*=", Feature)) %>%
+        group_by(Feature) %>%
         summarise(TrainMeanAbs=mean(abs(SHAP_Value)), .groups="drop")
-      val_summary <- shap_val_rv() %>% group_by(Feature) %>%
+      val_summary <- shap_val_rv() %>%
+        filter(!grepl("^id\\s*=", Feature)) %>%
+        group_by(Feature) %>%
         summarise(ValMeanAbs=mean(abs(SHAP_Value)), .groups="drop")
       merged <- full_join(train_summary,val_summary,by="Feature") %>%
         replace(is.na(.),0) %>%
@@ -402,10 +463,17 @@ xai_server <- function(id, app_data_rv) {
         options=list(pageLength=5, searching=FALSE, dom='t'), rownames=FALSE)
     })
 
-    # --- Download plot ---
+    # --- Download plot handler ---
     output$download_shap_plot <- downloadHandler(
-      filename=function() paste0("xai_plot_",Sys.Date(),".png"),
-      content=function(file){ ggsave(file, plot=last_plot(), width=7, height=5, dpi=300) }
+      filename = function() {
+        mode_label <- gsub(" ", "_", input$xai_mode)
+        paste0("xai_plot_", mode_label, "_", Sys.Date(), ".png")
+      },
+      content = function(file) {
+        req(plot_rv())
+
+        ggplot2::ggsave(file, plot = plot_rv(), width = 7, height = 5, dpi = 300)
+      }
     )
   })
 }

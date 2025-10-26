@@ -20,7 +20,7 @@ performance_ui <- function(id) {
         strong("Survival Plots:"), " For Survival models, you can switch between viewing the raw **Linear Predictor** (Log-Hazard proxy) or the exponential **Hazard Ratio** (Risk Score)."
       )
     ),
-    # -------------------------
+
     fluidRow(
       box(
         title = "Performance Summary",
@@ -28,13 +28,9 @@ performance_ui <- function(id) {
         solidHeader = TRUE,
         width = 12,
 
-        # --- Always visible: Compute button ---
         actionButton(ns("compute_perf"), "Compute Performance", icon = icon("calculator"), class = "btn-primary"),
         br(), br(),
 
-        # --- Conditional Output Container ---
-        # The content inside this UI will only be generated and displayed
-        # after the 'compute_perf' button is clicked and the server runs renderUI.
         uiOutput(ns("performance_results_ui"))
       )
     )
@@ -59,6 +55,7 @@ performance_server <- function(id, app_data_rv) {
       preds <- NULL
       truth <- NULL
       c_index_val <- NA
+      raw_preds_tbl <- NULL
 
       # --- 1. CONSOLIDATED MODEL ENGINE IDENTIFICATION ---
       model_engine <- "other"
@@ -68,7 +65,7 @@ performance_server <- function(id, app_data_rv) {
       } else if (inherits(fit_obj, "model_fit")) {
         model_engine <- fit_obj$spec$engine
       } else if (inherits(fit_obj, "ranger")) {
-        model_engine <- "ranger_base" # Distinguish base ranger from parsnip ranger
+        model_engine <- "ranger_base"
       } else if (inherits(fit_obj, "aorsf")) {
         model_engine <- "aorsf"
       }
@@ -82,10 +79,25 @@ performance_server <- function(id, app_data_rv) {
           ranger_preds <- predict(fit_obj, data = data)
           preds <- -log(ranger_preds$survival[, 1])
           truth <- survival::Surv(data[[outcome]], data[["status"]])
+
+          raw_preds_tbl <- tibble::tibble(
+            .pred_survival_t1 = ranger_preds$survival[, 1],
+            .pred_linear_pred = preds
+          )
+
         } else {
           ranger_preds <- predict(fit_obj, data = data)
           preds <- ranger_preds$predictions
           truth <- data[[outcome]]
+
+          if (task == "Classification (Binary)") {
+            raw_preds_tbl <- tibble::tibble(
+              .pred_prob = preds,
+              .pred_class = factor(ifelse(preds > 0.5, 1, 0))
+            )
+          } else { # Regression
+            raw_preds_tbl <- tibble::tibble(.pred = preds)
+          }
         }
         # --- TIDYMODELS MODELS (Main Path) ---
       } else {
@@ -100,46 +112,50 @@ performance_server <- function(id, app_data_rv) {
             } else {
               predict(fit_obj, data_for_pred, type = "linear_pred")
             }
-          } else {
+          } else if (task == "Classification (Binary)") {
+            predict(fit_obj, data_for_pred, type = "prob") %>%
+              dplyr::bind_cols(predict(fit_obj, data_for_pred, type = "class"))
+          } else { # Regression
             predict(fit_obj, data_for_pred)
           }
         }, error = function(e) { showNotification(paste("Prediction failed:", e$message), type = "error"); NULL })
 
         req(preds_tbl)
         truth <- data[[outcome]]
+        raw_preds_tbl <- preds_tbl
 
-        # --- 3. EXTRACTION LOGIC (Survival) ---
+        # --- 3. EXTRACTION LOGIC (for metrics/plots only) ---
         if (task == "Classification (Binary)") {
-          preds <- as.numeric(preds_tbl[[grep("^\\.pred_", names(preds_tbl), value = TRUE)[1]]])
+          preds <- raw_preds_tbl[[grep("^\\.pred_", names(raw_preds_tbl), value = TRUE)[1]]]
         } else if (task == "Regression (Continuous)") {
-          preds <- preds_tbl$.pred
+          preds <- raw_preds_tbl$.pred
         } else if (task == "Survival") {
           if (model_engine %in% c("ranger", "aorsf")) {
 
-            if (".pred" %in% names(preds_tbl) && !is.null(preds_tbl$.pred[[1]])) {
+            if (".pred" %in% names(raw_preds_tbl) && !is.null(raw_preds_tbl$.pred[[1]])) {
+              survival_vals <- sapply(raw_preds_tbl$.pred, function(x) x$.pred_survival)
+              preds <- -log(survival_vals)
 
-              # Extract the .pred_survival column from the .pred list column
-              survival_vals <- sapply(preds_tbl$.pred, function(x) x$.pred_survival)
+              raw_preds_tbl <- tibble::tibble(
+                .pred_survival_t1 = survival_vals,
+                .pred_linear_pred = preds
+              )
 
-              if (is.numeric(survival_vals) && length(survival_vals) == nrow(data)) {
-                preds <- -log(survival_vals)
-              } else {
-                showNotification("Survival column extraction failed within .pred list. Inner column missing.", type = "error")
-                return(NULL)
-              }
             } else {
-              showNotification("Survival prediction column (.pred) is missing or malformed.", type = "error")
+              showNotification("Survival column extraction failed within .pred list.", type = "error")
               return(NULL)
             }
           } else {
-            preds <- preds_tbl$.pred_linear_pred
-            if (is.null(preds)) { preds <- preds_tbl$.pred }
+            preds <- raw_preds_tbl$.pred_linear_pred
+            if (is.null(preds)) { preds <- raw_preds_tbl$.pred }
           }
           truth <- survival::Surv(data[[outcome]], data[["status"]])
         }
       }
 
-      req(preds)
+      req(preds, raw_preds_tbl)
+
+      app_data_rv$data_with_preds <- dplyr::bind_cols(data, raw_preds_tbl)
 
       # --- METRICS AND PLOTS ---
       metric_tbl <- tibble::tibble()
@@ -227,27 +243,39 @@ performance_server <- function(id, app_data_rv) {
       plots_rv(list(ggplots = ggplots_list, preds = preds, c_index = c_index_val))
     })
 
+    # --- DYNAMIC UI RENDERING (Conditional plot selection added here) ---
     output$performance_results_ui <- renderUI({
 
-      req(plots_rv()$ggplots)
+      req(plots_rv()$ggplots, app_data_rv$task)
+      task <- app_data_rv$task
+
+      # Conditionally render plot selection controls
+      plot_selection_ui <- if (task == "Survival") {
+        tagList(
+          checkboxGroupInput(
+            session$ns("plot_selection"),
+            label = "Select Plot View (Survival Only)",
+            choices = c("Linear Predictor (Log-Hazard)" = "linear_pred",
+                        "Hazard Ratio (Risk Score)" = "hazard_ratio"),
+            selected = "linear_pred",
+            inline = TRUE
+          ),
+          br()
+        )
+      } else {
+        tagList()
+      }
 
       tagList(
-        # --- Plot Selection (Survival Only) ---
-        checkboxGroupInput(
-          session$ns("plot_selection"),
-          label = "Select Plot View (Survival Only)",
-          choices = c("Linear Predictor (Log-Hazard)" = "linear_pred",
-                      "Hazard Ratio (Risk Score)" = "hazard_ratio"),
-          selected = "linear_pred",
-          inline = TRUE
-        ),
+        plot_selection_ui,
 
         # --- Dynamic Plot Output ---
         withSpinner(uiOutput(session$ns("perf_plots_output"))),
 
         br(),
         fluidRow(
-          column(3, downloadButton(session$ns("download_plot"), "Download Plot (PNG)"))
+          column(3, downloadButton(session$ns("download_plot"), "Download Plot (PNG)")),
+          column(4, downloadButton(session$ns("download_predictions"), "Download Data + Predictions", icon = icon("table")))
         ),
         br(),
         DTOutput(session$ns("metrics_table")),
@@ -258,7 +286,7 @@ performance_server <- function(id, app_data_rv) {
       )
     })
 
-    # --- DYNAMIC UI RENDERING (Survival) ---
+    # --- DYNAMIC PLOT OUTPUT CONTAINER ---
     output$perf_plots_output <- renderUI({
       req(plots_rv()$ggplots)
       task <- app_data_rv$task
@@ -301,7 +329,7 @@ performance_server <- function(id, app_data_rv) {
       plotly::ggplotly(plots_rv()$ggplots$hazard_ratio, tooltip = "text")
     })
 
-    # ... Metrics Table and Download handlers ...
+    # --- METRICS TABLE AND DOWNLOAD HANDLERS ---
 
     output$metrics_table <- renderDT({
       req(metrics_rv())
@@ -326,8 +354,8 @@ performance_server <- function(id, app_data_rv) {
           } else if ("linear_pred" %in% input$plot_selection) {
             current_plot_name <- "linear_pred"
           } else {
-            showNotification("Select a survival plot type to download.", type = "warning")
-            return(NULL)
+            # Default to linear_pred if survival but no selection is made (shouldn't happen with default selected)
+            current_plot_name <- "linear_pred"
           }
         } else {
           current_plot_name <- "main_plot"
@@ -338,6 +366,17 @@ performance_server <- function(id, app_data_rv) {
         if (!is.null(current_plot)) {
           ggplot2::ggsave(file, plot = current_plot, width = 7, height = 5, dpi = 300)
         }
+      }
+    )
+
+    output$download_predictions <- downloadHandler(
+      filename = function() {
+        model_name <- gsub("\\s+|\\(|\\)", "_", app_data_rv$task)
+        paste0("data_with_preds_", model_name, "_", Sys.Date(), ".csv")
+      },
+      content = function(file) {
+        req(app_data_rv$data_with_preds)
+        readr::write_csv(app_data_rv$data_with_preds, file)
       }
     )
   })
